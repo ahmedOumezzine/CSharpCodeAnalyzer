@@ -1,0 +1,135 @@
+﻿@{
+    ViewData["Title"] = "Analyseur de Code C#";
+}
+
+<div class="container mt-4">
+    <div class="text-center mb-4">
+        <h1 class="display-6">🔍 Analyseur de Code C#</h1>
+        <p class="lead">Collez votre code C# pour vérifier la qualité, le nommage, la complexité et les bonnes pratiques.</p>
+    </div>
+
+    <!-- Formulaire d'analyse -->
+    <form asp-action="Analyze" method="post">
+        <div class="mb-3">
+            <label for="sourceCode" class="form-label">Code C# à analyser</label>
+            <textarea name="sourceCode"
+                      id="sourceCode"
+                      rows="15"
+                      class="form-control font-monospace"
+                      placeholder="Collez votre code C# ici...">@ViewBag.SourceCode</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg">Analyser le Code</button>
+    </form>
+
+    @{
+        // Récupérer et désérialiser le résultat
+        var json = TempData["AnalysisResult"] as string;
+        CodeAnalyzer.Core.Models.AnalysisResult result = null;
+
+        if (!string.IsNullOrEmpty(json))
+        {
+            try
+            {
+                result = System.Text.Json.JsonSerializer.Deserialize<CodeAnalyzer.Core.Models.AnalysisResult>(json);
+            }
+            catch (Exception ex)
+            {
+                // En cas d'erreur de désérialisation
+                <div class="alert alert-danger mt-4">
+                    Erreur de lecture du résultat : @ex.Message
+                </div>
+            }
+        }
+    }
+
+    <!-- Affichage des résultats -->
+    @if (result != null)
+    {
+        <div class="mt-5">
+            <h2>📊 Résultats de l'analyse</h2>
+            <div class="alert alert-info">
+                <strong>Fichier :</strong> @result.FileName &nbsp;|&nbsp;
+                <strong>Problèmes détectés :</strong> <span class="badge bg-danger">@result.TotalIssues</span>
+            </div>
+
+            @foreach (var category in result.Categories)
+            {
+                var hasIssues = category.Issues.Any(i => !i.Passed);
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header @(hasIssues ? "bg-warning text-dark" : "bg-success text-white")">
+                        <h5 class="mb-0">
+                            @category.Name
+                            <span class="badge bg-light text-dark float-end">
+                                @category.Issues.Count(i => !i.Passed)/@category.Issues.Count
+                            </span>
+                        </h5>
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        @if (!category.Issues.Any())
+                        {
+                            <li class="list-group-item text-muted">Aucune règle appliquée.</li>
+                        }
+                        else
+                        {
+                            foreach (var issue in category.Issues)
+                            {
+                                <li class="list-group-item d-flex flex-column flex-lg-row justify-content-between align-items-start py-3 @(issue.Passed ? "bg-light" : "bg-light border-start border-danger border-4")">
+                                    <div class="me-3">
+                                        <strong>@issue.RuleName</strong>
+                                        <div class="text-muted small mt-1">@issue.Description</div>
+                                        @if (!string.IsNullOrEmpty(issue.Suggestion))
+                                        {
+                                            <div class="text-success mt-1"><em>Suggestion : @issue.Suggestion</em></div>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(issue.CodeSnippet))
+                                    {
+                                        <code class="mt-2 mt-lg-0 px-2 py-1 bg-white border">@issue.CodeSnippet</code>
+                                    }
+                                </li>
+                            }
+                        }
+                    </ul>
+                </div>
+            }
+
+            <!-- Résumé global -->
+            <div class="text-center mt-4">
+                @if (result.TotalIssues == 0)
+                {
+                    <div class="alert alert-success">
+                        <strong>✅ Excellent !</strong> Aucun problème détecté. Votre code respecte les bonnes pratiques.
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-warning">
+                        <strong>⚠️ Amélioration possible</strong> : @result.TotalIssues problème(s) trouvé(s). Consultez les catégories ci-dessus.
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Style personnalisé -->
+<style>
+    .font-monospace {
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+    }
+
+    .card-header h5 {
+        font-weight: 600;
+    }
+
+    code {
+        font-size: 0.9em;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+    }
+
+    .border-start {
+        border-left: 4px solid #dc3545 !important;
+    }
+</style>
