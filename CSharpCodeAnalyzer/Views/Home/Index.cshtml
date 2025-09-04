@@ -1,230 +1,267 @@
 ﻿@{
     ViewData["Title"] = "Analyseur de Code C#";
+
+    var result = ViewBag.Result as CodeAnalyzer.Core.Models.AnalysisResult;
+    var formattedCode = result?.FormattedCode ?? "";
+    var issues = new List<CodeAnalyzer.Core.Models.RuleResult>();
+
+    if (result != null)
+    {
+        issues = result.Categories
+            .SelectMany(c => c.Issues.Where(i => !i.Passed && !string.IsNullOrEmpty(i.CodeSnippet)))
+            .GroupBy(i => i.CodeSnippet)
+            .Select(g => g.First())
+            .OrderByDescending(i => i.CodeSnippet.Length)
+            .ToList();
+    }
+
+    string GetSuggestion(CodeAnalyzer.Core.Models.RuleResult issue)
+    {
+        if (string.IsNullOrEmpty(issue.CodeSnippet)) return "";
+
+        if (issue.RuleName.Contains("PascalCase") || issue.RuleName.Contains("majuscule"))
+            return char.ToUpper(issue.CodeSnippet[0]) + issue.CodeSnippet.Substring(1);
+        if (issue.RuleName.Contains("camelCase") || issue.RuleName.Contains("minuscule"))
+            return char.ToLower(issue.CodeSnippet[0]) + issue.CodeSnippet.Substring(1);
+        if (issue.RuleName.Contains("p"))
+            return "_" + char.ToLower(issue.CodeSnippet[1]) + issue.CodeSnippet.Substring(2);
+
+        return issue.CodeSnippet;
+    }
 }
 
-<div class="container mt-4">
+<div class="container mt-5">
     <div class="text-center mb-4">
-        <h1 class="display-6">🔍 Analyseur de Code C#</h1>
-        <p class="lead">Collez votre code C#. Seuls les noms erronés sont soulignés.</p>
+        <h1 class="display-5"><i class="fas fa-code"></i> Analyseur de Code C#</h1>
+        <p class="lead">Collez votre code C#. Cliquez sur un mot erroné pour corriger.</p>
     </div>
 
     <!-- Formulaire -->
     <form asp-action="Analyze" method="post">
-        <div class="mb-3">
-            <label for="sourceCode" class="form-label">Code C# à analyser</label>
-            <textarea name="sourceCode"
-                      id="sourceCode"
-                      rows="15"
-                      class="form-control font-monospace"
-                      placeholder="Collez votre code C# ici...">@ViewBag.SourceCode</textarea>
+        <div class="card">
+            <div class="card-body">
+                <label for="sourceCode" class="form-label">Code C# à analyser</label>
+                <textarea name="sourceCode"
+                          id="sourceCode"
+                          rows="10"
+                          class="form-control font-monospace"
+                          placeholder="Collez votre code C# ici...">@ViewBag.SourceCode</textarea>
+            </div>
+            <div class="card-footer text-end">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="fas fa-search"></i> Analyser le Code
+                </button>
+            </div>
         </div>
-        <button type="submit" class="btn btn-primary">Analyser</button>
     </form>
 
-    @{
-        var resultJson = ViewBag.AnalysisResultJson as string;
-        CodeAnalyzer.Core.Models.AnalysisResult result = null;
-
-        if (!string.IsNullOrEmpty(resultJson))
-        {
-            try
-            {
-                result = System.Text.Json.JsonSerializer.Deserialize<CodeAnalyzer.Core.Models.AnalysisResult>(resultJson);
-            }
-            catch { }
-        }
-    }
-
-    <!-- Affichage du code -->
-    @if (result != null && !string.IsNullOrEmpty(ViewBag.SourceCode))
+    @if (result != null && !string.IsNullOrEmpty(formattedCode))
     {
-        <div class="mt-5">
-            <h2>📄 Code analysé</h2>
-            <p><strong>Problèmes détectés :</strong> <span class="badge bg-danger">@result.TotalIssues</span></p>
+        var displayCode = Html.Encode(formattedCode);
 
-            <!-- Code avec mots soulignés -->
-            <pre class="border p-3 bg-light" style="font-family: 'Courier New', monospace; white-space: pre; line-height: 1.6;">
-                    @{
-                            var lines = (ViewBag.SourceCode as string).Split('\n');
-                            var errors = result.Categories
-                                    .SelectMany(c => c.Issues.Where(i => !i.Passed && i.LineNumber > 0 && i.ColumnNumber > 0 && !string.IsNullOrEmpty(i.CodeSnippet)))
-                                    .OrderByDescending(e => e.ColumnNumber) // Important : traiter de droite à gauche
-                                    .ToList();
+        foreach (var issue in issues)
+        {
+            var snippet = Html.Encode(issue.CodeSnippet);
+            var suggestion = GetSuggestion(issue);
+            var encodedSuggestion = Html.Encode(suggestion);
+            var replacement = $"<span class=\"error-word\" data-current=\"{snippet}\" data-suggestion=\"{encodedSuggestion}\" style=\"background-color:#ffebee;border-bottom:2px solid #f44336;cursor:pointer;\" title=\"Cliquez pour corriger\">{snippet}</span>";
 
-                            for (int i = 0; i < lines.Length; i++)
-                            {
-                                    var lineNumber = i + 1;
-                                    var line = lines[i];
-                                    var errorsOnLine = errors.Where(e => e.LineNumber == lineNumber).ToList();
+            displayCode = System.Text.RegularExpressions.Regex.Replace(
+            displayCode,
+            @"\b" + System.Text.RegularExpressions.Regex.Escape(snippet) + @"\b",
+            replacement
+            );
+        }
 
-                                    if (errorsOnLine.Count == 0)
-                                    {
-                                            @line
-                
-                                            <br />
-                                            continue;
-                                    }
-
-                                    var modifiedLine = line;
-
-                                    foreach (var error in errorsOnLine)
-                                    {
-                                            var col = error.ColumnNumber - 1; // 0-based
-                                            var length = error.CodeSnippet.Length;
-
-                                            // Vérifier que la position est valide
-                                            if (col < 0 || col >= modifiedLine.Length || col + length > modifiedLine.Length)
-                                                    continue;
-
-                                            // Extraire le mot à cette position
-                                            var actualWord = modifiedLine.Substring(col, length);
-                                            if (actualWord != error.CodeSnippet)
-                                                    continue; // Éviter les faux remplacements
-
-                                            var before = modifiedLine.Substring(0, col);
-                                            var after = modifiedLine.Substring(col + length);
-                                            var replacement = $"<span class='error-word' data-snippet='{HtmlEncoder.Encode(error.CodeSnippet)}' style='background-color:#ffebee;border-bottom:2px solid #f44336;cursor:pointer;'>{error.CodeSnippet}</span>";
-
-                                            modifiedLine = before + replacement + after;
-                                    }
-
-                                    @Html.Raw(modifiedLine)
-                            
-                                    <br />
-                            }
-                    }
-                </pre>
-        </div>
-
-        <!-- Détail des erreurs -->
-        <div class="mt-4">
-            <h3>📋 Détail des erreurs</h3>
-            @foreach (var category in result.Categories)
-            {
-                if (category.Issues.Any(i => !i.Passed))
-                {
-                    <div class="card mb-3">
-                        <div class="card-header bg-warning text-dark">
-                            <h5 class="mb-0">@category.Name</h5>
-                        </div>
-                        <ul class="list-group list-group-flush">
-                            @foreach (var issue in category.Issues.Where(i => !i.Passed))
-                            {
-                                <li class="list-group-item">
-                                    <strong>@issue.RuleName</strong><br />
-                                    <small>Ligne @issue.LineNumber, Colonne @issue.ColumnNumber : @issue.Description</small>
-                                    @if (!string.IsNullOrEmpty(issue.Suggestion))
-                                    {
-                                        <br />
-                    
-                                        <em>@issue.Suggestion</em>
-                                    }
-                                </li>
-                            }
-                        </ul>
+        <div class="row mt-4">
+            <!-- Code Formaté -->
+            <div class="col-12 col-lg-7 mb-4">
+                <div class="card">
+                    <div class="card-header bg-dark text-white">
+                        <h5 class="mb-0"><i class="fas fa-file-code"></i> Code Formaté</h5>
                     </div>
-                }
-            }
+                    <div class="card-body p-3">
+                        <pre id="formattedCode" class="border p-3 bg-light mb-0"
+                             style="font-family: 'Courier New', monospace; white-space: pre; line-height: 1.6;">
+    @Html.Raw(displayCode)
+                            </pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table des erreurs -->
+            <div class="col-12 col-lg-5">
+                <div class="card">
+                    <div class="card-header bg-danger text-white">
+                        <h5 class="mb-0"><i class="fas fa-exclamation-triangle"></i> Erreurs détectées</h5>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Total :</strong> <span class="badge bg-danger">@result.TotalIssues</span></p>
+
+                        @if (result.TotalIssues == 0)
+                        {
+                            <div class="alert alert-success">✅ Aucune erreur</div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Mot</th>
+                                            <th>Suggestion</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var issue in issues)
+                                        {
+                                            var suggestion = GetSuggestion(issue);
+                                            <tr>
+                                                <td><code>@issue.CodeSnippet</code></td>
+                                                <td><code>@suggestion</code></td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-outline-success fix-btn"
+                                                            data-current="@issue.CodeSnippet"
+                                                            data-suggestion="@suggestion">
+                                                        ✅ Corriger
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
         </div>
     }
 </div>
 
 <!-- Popup -->
-<div id="errorPopup" class="popup hidden">
-    <div class="popup-content">
-        <h5 id="popupTitle">Erreur</h5>
-        <p id="popupDescription"></p>
-        <button onclick="closePopup()">Fermer</button>
+<div id="errorPopup" class="modal fade" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title">🔧 Corriger l'erreur</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Remplacer</strong> <code id="popupCurrent"></code> <strong>par</strong> <code id="popupNew"></code> ?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button type="button" class="btn btn-success" id="applyFix">Appliquer</button>
+            </div>
+        </div>
     </div>
 </div>
 
-<!-- Style -->
-<style>
-    .popup {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        padding: 1rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        z-index: 1000;
-        max-width: 400px;
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Code actuel (formaté)
+    let currentCode = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(formattedCode));
+
+    // Fonction pour ouvrir le popup
+    function openFixPopup(current, suggestion) {
+        console.log("Ouverture popup:", { current, suggestion }); // 🔍 Debug
+
+        const popupCurrent = document.getElementById('popupCurrent');
+        const popupNew = document.getElementById('popupNew');
+
+        if (!popupCurrent || !popupNew) {
+            console.error("Popup éléments non trouvés");
+            return;
+        }
+
+        popupCurrent.textContent = current;
+        popupNew.textContent = suggestion;
+
+        const applyFixBtn = document.getElementById('applyFix');
+        if (applyFixBtn) {
+            applyFixBtn.onclick = function () {
+                console.log("Correction:", current, "→", suggestion);
+                currentCode = currentCode.replace(current, suggestion);
+                updateDisplay();
+                const modal = bootstrap.Modal.getInstance(document.getElementById('errorPopup'));
+                modal.hide();
+            };
+        }
+
+        const modalElement = document.getElementById('errorPopup');
+        if (modalElement) {
+            const modal = new bootstrap.Modal(modalElement);
+            modal.show();
+        } else {
+            console.error("Modal #errorPopup non trouvé");
+        }
     }
 
-        .popup.hidden {
-            display: none;
+    // Mettre à jour l'affichage
+    function updateDisplay() {
+        let displayCode = currentCode;
+
+        @foreach (var issue in issues)
+        {
+                var current = HtmlEncoder.Encode(issue.CodeSnippet);
+                var suggestion = HtmlEncoder.Encode(GetSuggestion(issue));
+                var replacement = $"<span class=\"error-word\" data-current=\"{current}\" data-suggestion=\"{suggestion}\" style=\"background-color:#ffebee;border-bottom:2px solid #f44336;cursor:pointer;\">{current}</span>";
+                <text>
+                const regex = new RegExp("\\b" + current + "\\b", "g");
+                displayCode = displayCode.replace(regex, "@replacement");
+                </text>
         }
 
-        .popup button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
+        const container = document.getElementById('formattedCode');
+        if (container) {
+            container.innerHTML = displayCode;
+            attachEventListeners(); // 🔁 Réattacher les événements
         }
-</style>
+    }
 
-<!-- JavaScript -->
-<script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const popup = document.getElementById('errorPopup');
-        const popupTitle = document.getElementById('popupTitle');
-        const popupDescription = document.getElementById('popupDescription');
+    // Attacher les événements
+    function attachEventListeners() {
+        console.log("Attaching event listeners..."); // 🔍 Debug
 
-        // Charger les erreurs
-        const resultJson = @Html.Raw(resultJson ?? "null");
-        const errors = {};
-
-        if (resultJson) {
-            resultJson.Categories.forEach(cat => {
-                cat.Issues.forEach(issue => {
-                    if (!issue.Passed && issue.CodeSnippet) {
-                        const decoded = decodeHtml(issue.CodeSnippet);
-                        errors[decoded] = {
-                            rule: issue.RuleName,
-                            description: issue.Description,
-                            suggestion: issue.Suggestion || ''
-                        };
-                    }
-                });
-            });
-        }
-
-        function decodeHtml(html) {
-            var txt = document.createElement("textarea");
-            txt.innerHTML = html;
-            return txt.value;
-        }
-
-        // Clic sur les mots soulignés
+        // Clic sur mot souligné
         document.querySelectorAll('.error-word').forEach(el => {
+            el.removeEventListener('click', null); // Nettoyer
             el.addEventListener('click', function () {
-                const word = decodeHtml(this.getAttribute('data-snippet'));
-                const error = errors[word];
-                if (error) {
-                    popupTitle.textContent = error.rule;
-                    popupDescription.innerHTML = `
-                        <strong>${error.description}</strong>
-                        ${error.suggestion ? `<br><em>${error.suggestion}</em>` : ''}
-                    `;
-                    popup.classList.remove('hidden');
+                const current = this.getAttribute('data-current');
+                const suggestion = this.getAttribute('data-suggestion');
+                if (current && suggestion) {
+                    openFixPopup(current, suggestion);
+                } else {
+                    console.warn("Données manquantes:", { current, suggestion });
                 }
             });
         });
 
-        // Fermer popup
-        window.onclick = e => {
-            if (e.target === popup) {
-                popup.classList.add('hidden');
-            }
-        };
+        // Clic sur bouton "Corriger"
+        document.querySelectorAll('.fix-btn').forEach(btn => {
+            btn.removeEventListener('click', null);
+            btn.addEventListener('click', function () {
+                const current = this.getAttribute('data-current');
+                const suggestion = this.getAttribute('data-suggestion');
+                if (current && suggestion) {
+                    openFixPopup(current, suggestion);
+                }
+            });
+        });
+    }
 
-        function closePopup() {
-            popup.classList.add('hidden');
-        }
+    // Attendre que le DOM soit chargé
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log("DOM chargé, initialisation..."); // ✅
+        attachEventListeners();
     });
 </script>
+
+<style>
+    .error-word:hover {
+        background-color: #ffcdd2 !important;
+    }
+</style>

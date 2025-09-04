@@ -2,7 +2,7 @@
 using Microsoft.CodeAnalysis.CSharp;
 using CodeAnalyzer.Core.Analyzers;
 using CodeAnalyzer.Core.Models;
-using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace CodeAnalyzer.Core;
 
@@ -17,29 +17,29 @@ public class DefaultCodeAnalyzer : ICodeAnalyzer
 
         try
         {
-            // Parser le code
-            var tree = CSharpSyntaxTree.ParseText(code);
+            // ✅ 1. Formater le code
+            var formattedCode = FormatCode(code);
+            result.FormattedCode = formattedCode; // ← Sauvegarde le code formaté
+
+            // ✅ 2. Parser le code formaté
+            var tree = CSharpSyntaxTree.ParseText(formattedCode);
             var root = tree.GetRoot();
 
-            // Créer une compilation pour permettre l'analyse sémantique
+            // ✅ 3. Créer la compilation
             var compilation = CSharpCompilation.Create(
-                assemblyName: "TemporaryAssembly",
-                syntaxTrees: new[] { tree },
-                references: GetMetadataReferences(),
-                options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                "TemporaryAssembly",
+                new[] { tree },
+                GetMetadataReferences(),
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
             );
 
-            // Appliquer les analyseurs
+            var model = compilation.GetSemanticModel(tree);
+
+            // ✅ 4. Appliquer les analyseurs
             NamingAnalyzer.Analyze(result, root);
-
-            // Tu pourras ajouter d'autres analyseurs plus tard :
-            // ComplexityAnalyzer.Analyze(result, root);
-            // DocumentationAnalyzer.Analyze(result, root);
-
         }
         catch (Exception ex)
         {
-            // En cas d'erreur de parsing
             result.Categories.Add(new CategoryResult
             {
                 Name = "Erreur",
@@ -59,8 +59,52 @@ public class DefaultCodeAnalyzer : ICodeAnalyzer
         return result;
     }
 
+
     /// <summary>
-    /// Charge les références nécessaires pour la compilation
+    /// Reformate le code C# : supprime les espaces excessifs, mais préserve la lisibilité
+    /// </summary>
+    private static string FormatCode(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return code;
+
+        var lines = code.Split('\n');
+        var sb = new System.Text.StringBuilder();
+        var indentLevel = 0;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            // Sauter les lignes vides
+            if (string.IsNullOrEmpty(trimmed))
+                continue;
+
+            // Gérer l'indentation avant }
+            if (trimmed == "}" || trimmed.StartsWith("}"))
+            {
+                indentLevel = Math.Max(0, indentLevel - 1);
+            }
+
+            // Ajouter la ligne avec indentation
+            var indentedLine = new string(' ', indentLevel * 4) + trimmed;
+
+            sb.AppendLine(indentedLine);
+
+            // Augmenter l'indentation après {
+            if (trimmed.EndsWith("{") || trimmed.Contains(" { "))
+            {
+                indentLevel++;
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
+
+
+
+    /// <summary>
+    /// Références pour la compilation
     /// </summary>
     private static MetadataReference[] GetMetadataReferences()
     {
@@ -71,7 +115,6 @@ public class DefaultCodeAnalyzer : ICodeAnalyzer
             MetadataReference.CreateFromFile(typeof(Console).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(System.IO.Stream).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(System.Collections.Generic.List<>).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(System.ComponentModel.INotifyPropertyChanged).Assembly.Location),
         };
     }
 }

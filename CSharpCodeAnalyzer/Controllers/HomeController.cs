@@ -14,23 +14,23 @@ public class HomeController : Controller
         _analyzer = analyzer;
     }
 
-public IActionResult Index()
-{
-    return View();
-}
+    public IActionResult Index()
+    {
+        return View();
+    }
 
     [HttpPost]
     public IActionResult Analyze(string sourceCode)
     {
         if (string.IsNullOrWhiteSpace(sourceCode))
         {
-            return RedirectToAction("Index");
+            ViewBag.Result = new AnalysisResult();
+            return View("Index");
         }
 
         var analyzer = new DefaultCodeAnalyzer();
         var result = analyzer.Analyze(sourceCode, "Fichier temporaire");
 
-        ViewBag.SourceCode = sourceCode;
         ViewBag.Result = result;
         ViewBag.AnalysisResultJson = JsonSerializer.Serialize(result);
 
