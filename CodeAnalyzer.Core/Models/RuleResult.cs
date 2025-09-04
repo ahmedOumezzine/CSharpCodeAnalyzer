@@ -1,4 +1,5 @@
-﻿namespace CodeAnalyzer.Core.Models;
+﻿// Models/RuleResult.cs
+namespace CodeAnalyzer.Core.Models;
 
 public class RuleResult
 {
@@ -7,6 +8,9 @@ public class RuleResult
     public bool Passed { get; set; }
     public string? Suggestion { get; set; }
     public string? CodeSnippet { get; set; }
-    public int LineNumber { get; set; }  // ← Nouveau
-    public int ColumnNumber { get; set; } // ← Nouveau
+    public int LineNumber { get; set; }
+    public int ColumnNumber { get; set; }
+    public string Category { get; set; } = string.Empty;
+
+    public string? PrMessage { get; set; }
 }

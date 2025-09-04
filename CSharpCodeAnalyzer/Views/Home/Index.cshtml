@@ -1,21 +1,18 @@
-﻿@{
+﻿@using CodeAnalyzer.Core.Models
+
+@{
     ViewData["Title"] = "Analyseur de Code C#";
 
-    var result = ViewBag.Result as CodeAnalyzer.Core.Models.AnalysisResult;
+    var result = ViewBag.Result as AnalysisResult;
     var formattedCode = result?.FormattedCode ?? "";
-    var issues = new List<CodeAnalyzer.Core.Models.RuleResult>();
 
-    if (result != null)
-    {
-        issues = result.Categories
-            .SelectMany(c => c.Issues.Where(i => !i.Passed && !string.IsNullOrEmpty(i.CodeSnippet)))
-            .GroupBy(i => i.CodeSnippet)
-            .Select(g => g.First())
-            .OrderByDescending(i => i.CodeSnippet.Length)
-            .ToList();
-    }
+    // ✅ Regrouper toutes les erreurs par mot (même mot → plusieurs erreurs)
+    var issuesBySnippet = result?.Categories
+        .SelectMany(c => c.Issues.Where(i => !i.Passed && !string.IsNullOrEmpty(i.CodeSnippet)))
+        .GroupBy(i => i.CodeSnippet)
+        .ToDictionary(g => g.Key, g => g.ToList()) ?? new Dictionary<string, List<RuleResult>>();
 
-    string GetSuggestion(CodeAnalyzer.Core.Models.RuleResult issue)
+    string GetSuggestion(RuleResult issue)
     {
         if (string.IsNullOrEmpty(issue.CodeSnippet)) return "";
 
@@ -28,17 +25,25 @@
 
         return issue.CodeSnippet;
     }
+
+    string GetPrMessageForSnippet(string snippet)
+    {
+        if (!issuesBySnippet.ContainsKey(snippet)) return "// Aucune erreur";
+
+        var messages = issuesBySnippet[snippet].Select(i => i.PrMessage ?? $"// ❌ `{i.CodeSnippet}` → {i.Description}");
+        return string.Join("\n//\n", messages);
+    }
 }
 
 <div class="container mt-5">
     <div class="text-center mb-4">
         <h1 class="display-5"><i class="fas fa-code"></i> Analyseur de Code C#</h1>
-        <p class="lead">Cliquez sur un mot erroné pour corriger.</p>
+        <p class="lead">Cliquez sur un mot erroné pour voir toutes les erreurs.</p>
     </div>
 
     <!-- Formulaire -->
     <form asp-action="Analyze" method="post">
-        <div class="card">
+        <div class="card mb-4">
             <div class="card-body">
                 <label for="sourceCode" class="form-label">Code C# à analyser</label>
                 <textarea 
@@ -48,9 +53,7 @@
                     class="form-control font-monospace">@ViewBag.SourceCode</textarea>
             </div>
             <div class="card-footer text-end">
-                <button type="submit" class="btn btn-primary btn-lg">
-                    <i class="fas fa-search"></i> Analyser
-                </button>
+                <button type="submit" class="btn btn-primary">Analyser</button>
             </div>
         </div>
     </form>
@@ -59,12 +62,11 @@
     {
         var displayCode = Html.Encode(formattedCode);
 
-        foreach (var issue in issues)
+        // ✅ Remplacer chaque mot erroné par un span cliquable
+        foreach (var snippet in issuesBySnippet.Keys)
         {
-            var snippet = Html.Encode(issue.CodeSnippet);
-            var suggestion = GetSuggestion(issue);
-            var encodedSuggestion = Html.Encode(suggestion);
-            var replacement = $"<span class=\"error-clickable\" data-current=\"{snippet}\" data-suggestion=\"{encodedSuggestion}\" style=\"background-color:#ffebee;border-bottom:2px solid #f44336;cursor:pointer;\" title=\"Cliquez pour corriger\">{snippet}</span>";
+            var encodedSnippet = Html.Encode(snippet);
+            var replacement = $"<span class=\"error-clickable\" data-code-snippet=\"{encodedSnippet}\" style=\"background-color:#ffebee;border-bottom:2px solid #f44336;cursor:pointer;\" title=\"Cliquez pour voir les erreurs\">{encodedSnippet}</span>";
 
             displayCode = System.Text.RegularExpressions.Regex.Replace(
                 displayCode,
@@ -73,7 +75,7 @@
             );
         }
 
-        <div class="row mt-4">
+        <div class="row">
             <!-- Code Formaté -->
             <div class="col-12 col-lg-7 mb-4">
                 <div class="card">
@@ -89,52 +91,59 @@
                 </div>
             </div>
 
-            <!-- Table des erreurs -->
+            <!-- Détail par analyseur -->
             <div class="col-12 col-lg-5">
-                <div class="card">
-                    <div class="card-header bg-danger text-white">
-                        <h5 class="mb-0"><i class="fas fa-exclamation-triangle"></i> Erreurs détectées</h5>
-                    </div>
-                    <div class="card-body">
-                        <p><strong>Total :</strong> <span class="badge bg-danger">@result.TotalIssues</span></p>
+                @if (result.Categories.Any())
+                {
+                    foreach (var category in result.Categories)
+                    {
+                        var issuesInCategory = category.Issues.Where(i => !i.Passed).ToList();
+                        if (!issuesInCategory.Any()) continue;
 
-                        @if (result.TotalIssues == 0)
-                        {
-                            <div class="alert alert-success">✅ Aucune erreur</div>
-                        }
-                        else
-                        {
-                            <div class="table-responsive">
-                                <table class="table table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>Mot</th>
-                                            <th>Suggestion</th>
-                                            <th>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var issue in issues)
-                                        {
-                                            var suggestion = GetSuggestion(issue);
-                                            <tr>
-                                                <td><code>@issue.CodeSnippet</code></td>
-                                                <td><code>@suggestion</code></td>
-                                                <td>
-                                                    <button class="btn btn-sm btn-outline-success fix-btn"
-                                                            data-current="@issue.CodeSnippet"
-                                                            data-suggestion="@suggestion">
-                                                        ✅ Corriger
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
+                        <div class="card mb-4">
+                            <div class="card-header 
+                                @(category.Name.Contains("Nommage") ? "bg-danger" :
+                                  category.Name.Contains("Complexité") ? "bg-warning" :
+                                  category.Name.Contains("Documentation") ? "bg-info" :
+                                  category.Name.Contains("inutilisé") ? "bg-secondary" :
+                                  category.Name.Contains("Doublon") ? "bg-dark" :
+                                  category.Name.Contains("Exception") ? "bg-danger" :
+                                  category.Name.Contains("Taille") ? "bg-primary" : "bg-light")
+                                text-white">
+                                <h5 class="mb-0">@category.Name (@issuesInCategory.Count)</h5>
                             </div>
-                        }
-                    </div>
-                </div>
+                            <div class="card-body">
+                                <ul class="list-unstyled">
+                                    @foreach (var issue in issuesInCategory)
+                                    {
+                                        <li class="mb-3">
+                                            <div class="d-flex justify-content-between">
+                                                <strong>@(string.IsNullOrEmpty(issue.CodeSnippet) ? "—" : $"<code>{issue.CodeSnippet}</code>")</strong>
+                                            </div>
+                                            <small>@issue.Description</small>
+                                            @if (!string.IsNullOrEmpty(issue.Suggestion))
+                                            {
+                                                <div class="mt-1">
+                                                    <em>Suggestion : <code>@issue.Suggestion</code></em>
+                                                </div>
+                                            }
+                                            @if (issue.LineNumber > 0)
+                                            {
+                                                <div class="text-muted small mt-1">
+                                                    <i class="fas fa-line"></i> Ligne @issue.LineNumber
+                                                </div>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="alert alert-success">✅ Aucune erreur détectée</div>
+                }
             </div>
         </div>
     }
@@ -142,18 +151,25 @@
 
 <!-- Popup -->
 <div id="errorPopup" class="modal fade" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header bg-warning text-dark">
-                <h5 class="modal-title">🔧 Corriger</h5>
+                <h5 class="modal-title">🔍 Erreurs pour <code id="popupSnippet"></code></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p><strong>Remplacer</strong> <code id="popupCurrent"></code> <strong>par</strong> <code id="popupNew"></code> ?</p>
+                <div id="errorDetails">
+                    <!-- Rempli par JS -->
+                </div>
+
+                <div class="mt-4">
+                    <h6><i class="fas fa-paste"></i> 📋 Message pour PR</h6>
+                    <pre id="prMessage" class="border p-3 bg-light" style="white-space: pre-wrap;"></pre>
+                </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
-                <button type="button" class="btn btn-success" id="applyFix">Appliquer</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button>
+                <button type="button" class="btn btn-outline-info" id="copyPrMessage">📋 Copier PR</button>
             </div>
         </div>
     </div>
@@ -162,77 +178,89 @@
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // ✅ Sérialiser en JSON pour éviter les problèmes d'échappement
-    let currentCode = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(formattedCode));
-    const errorList = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
-        issues.Select(i => new {
-            current = i.CodeSnippet,
-            suggestion = GetSuggestion(i)
-        }).ToList()
-    ));
+    // ✅ Toutes les erreurs
+const allIssues = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+    result?.Categories
+        .SelectMany(c => c.Issues.Where(i => !i.Passed && !string.IsNullOrEmpty(i.CodeSnippet)))
+        .Select(i => new {
+            CodeSnippet = i.CodeSnippet,
+            RuleName = i.RuleName,
+            Description = i.Description,
+            Suggestion = i.Suggestion ?? "",
+            Category = i.Category,
+            PrMessage = i.PrMessage ?? $"// ❌ `{i.CodeSnippet}` → {i.Description}"
+        })
+        .Cast<object>()  // ✅ Convertit en IEnumerable<object>
+        .ToList()        // ✅ Devient List<object>
+    ?? new List<object>()  // ✅ Même type
+));
 
-    function openFixPopup(current, suggestion) {
-        console.log("🔧 Ouvrir popup:", { current, suggestion });
+    // Ouvrir popup
+    function openErrorPopup(snippet) {
+        const issues = allIssues.filter(i => i.CodeSnippet === snippet);
+        const detailsContainer = document.getElementById('errorDetails');
+        const prMessageContainer = document.getElementById('prMessage');
+        const popupSnippet = document.getElementById('popupSnippet');
 
-        document.getElementById('popupCurrent').textContent = current;
-        document.getElementById('popupNew').textContent = suggestion;
+        popupSnippet.textContent = snippet;
+        detailsContainer.innerHTML = '';
+        prMessageContainer.textContent = '';
 
-        document.getElementById('applyFix').onclick = function () {
-            currentCode = currentCode.replace(current, suggestion);
-            updateDisplay();
-            bootstrap.Modal.getInstance(document.getElementById('errorPopup')).hide();
+        if (issues.length === 0) {
+            detailsContainer.innerHTML = '<p>Aucune erreur détectée.</p>';
+            return;
+        }
+
+        // Afficher chaque erreur
+        issues.forEach(issue => {
+            const div = document.createElement('div');
+            div.className = 'mb-3 p-2 border rounded bg-light';
+            div.innerHTML = `
+                <strong class="text-danger">❌ ${issue.RuleName}</strong><br>
+                <small>${issue.Description}</small><br>
+                <em>Suggestion : <code>${issue.Suggestion}</code></em>
+            `;
+            detailsContainer.appendChild(div);
+        });
+
+        // Générer message PR
+        const prMessages = issues.map(i => i.PrMessage);
+        prMessageContainer.textContent = prMessages.join('\n//\n');
+
+        // Bouton "Copier PR"
+        document.getElementById('copyPrMessage').onclick = function () {
+            navigator.clipboard.writeText(prMessageContainer.textContent).then(() => {
+                const btn = document.getElementById('copyPrMessage');
+                btn.textContent = '✅ Copié !';
+                setTimeout(() => btn.textContent = '📋 Copier PR', 2000);
+            });
         };
 
+        // Ouvrir modal
         new bootstrap.Modal(document.getElementById('errorPopup')).show();
     }
 
-    function updateDisplay() {
-        let displayCode = currentCode;
-
-        errorList.forEach(item => {
-            const regex = new RegExp("\\b" + item.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "\\b", "g");
-            const escapedSuggestion = item.suggestion
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '<')
-                .replace(/>/g, '>');
-
-            const replacement = `<span class="error-clickable" data-current="${item.current}" data-suggestion="${item.suggestion}" style="background-color:#ffebee;border-bottom:2px solid #f44336;cursor:pointer;">${item.current}</span>`;
-            displayCode = displayCode.replace(regex, replacement);
-        });
-
-        const container = document.getElementById('formattedCode');
-        if (container) {
-            container.innerHTML = displayCode;
-            attachEventListeners();
-        }
-    }
-
-    function attachEventListeners() {
+    // Attacher événements
+    document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.error-clickable').forEach(el => {
-            el.onclick = () => {
-                const current = el.getAttribute('data-current');
-                const suggestion = el.getAttribute('data-suggestion');
-                openFixPopup(current, suggestion);
+            el.onclick = function () {
+                const snippet = this.getAttribute('data-code-snippet');
+                openErrorPopup(snippet);
             };
         });
-
-        document.querySelectorAll('.fix-btn').forEach(btn => {
-            btn.onclick = () => {
-                const current = btn.getAttribute('data-current');
-                const suggestion = btn.getAttribute('data-suggestion');
-                openFixPopup(current, suggestion);
-            };
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        updateDisplay(); // Initialiser l'affichage
     });
 </script>
 
 <style>
-    .error-clickable:hover {
-        background-color: #ffcdd2 !important;
+    .error-clickable {
+        background-color: #ffebee;
+        border-bottom: 2px solid #f44336;
+        cursor: pointer;
         border-radius: 2px;
+        padding: 0 2px;
+    }
+
+    .error-clickable:hover {
+        background-color: #ffcdd2;
     }
 </style>

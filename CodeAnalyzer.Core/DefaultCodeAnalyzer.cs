@@ -1,8 +1,7 @@
-﻿using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using CodeAnalyzer.Core.Analyzers;
+﻿using CodeAnalyzer.Core.Analyzers;
 using CodeAnalyzer.Core.Models;
-using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace CodeAnalyzer.Core;
 
@@ -37,6 +36,12 @@ public class DefaultCodeAnalyzer : ICodeAnalyzer
 
             // ✅ 4. Appliquer les analyseurs
             NamingAnalyzer.Analyze(result, root);
+            ComplexityAnalyzer.Analyze(result, root);
+            DocumentationAnalyzer.Analyze(result, root);
+            DuplicateCodeAnalyzer.Analyze(result, root);
+            ExceptionAnalyzer.Analyze(result, root);
+            SizeAnalyzer.Analyze(result, root);
+            UnusedCodeAnalyzer.Analyze(result, root);
         }
         catch (Exception ex)
         {
@@ -58,7 +63,6 @@ public class DefaultCodeAnalyzer : ICodeAnalyzer
 
         return result;
     }
-
 
     /// <summary>
     /// Reformate le code C# : supprime les espaces excessifs, mais préserve la lisibilité
@@ -100,8 +104,6 @@ public class DefaultCodeAnalyzer : ICodeAnalyzer
 
         return sb.ToString().Trim();
     }
-
-
 
     /// <summary>
     /// Références pour la compilation
