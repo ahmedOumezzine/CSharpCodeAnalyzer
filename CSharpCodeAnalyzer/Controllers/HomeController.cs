@@ -14,27 +14,26 @@ public class HomeController : Controller
         _analyzer = analyzer;
     }
 
-    public IActionResult Index(string result = null)
-    {
-        ViewBag.Result = TempData["AnalysisResult"] as AnalysisResult;
-        return View();
-    }
+public IActionResult Index()
+{
+    return View();
+}
 
     [HttpPost]
     public IActionResult Analyze(string sourceCode)
     {
         if (string.IsNullOrWhiteSpace(sourceCode))
         {
-            TempData["AnalysisResult"] = JsonSerializer.Serialize(new AnalysisResult());
             return RedirectToAction("Index");
         }
 
         var analyzer = new DefaultCodeAnalyzer();
         var result = analyzer.Analyze(sourceCode, "Fichier temporaire");
 
-        // ✅ Sérialise l'objet en JSON avant de le stocker
-        TempData["AnalysisResult"] = JsonSerializer.Serialize(result);
+        ViewBag.SourceCode = sourceCode;
+        ViewBag.Result = result;
+        ViewBag.AnalysisResultJson = JsonSerializer.Serialize(result);
 
-        return RedirectToAction("Index");
+        return View("Index");
     }
 }

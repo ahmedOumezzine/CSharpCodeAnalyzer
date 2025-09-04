@@ -1,7 +1,6 @@
-﻿namespace CodeAnalyzer.Core
-{
-    public class ICodeAnalyzer
-    {
+﻿namespace CodeAnalyzer.Core;
 
-    }
+public interface ICodeAnalyzer
+{
+    Models.AnalysisResult Analyze(string code, string fileName = "Unknown");
 }

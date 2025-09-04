@@ -7,4 +7,6 @@ public class RuleResult
     public bool Passed { get; set; }
     public string? Suggestion { get; set; }
     public string? CodeSnippet { get; set; }
+    public int LineNumber { get; set; }  // ← Nouveau
+    public int ColumnNumber { get; set; } // ← Nouveau
 }
